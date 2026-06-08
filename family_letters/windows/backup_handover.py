@@ -704,7 +704,7 @@ class BackupHandoverWindow(QWidget):
                 ".photo-desc{color:#999;font-size:12px;margin-top:4px;}",
                 "</style></head><body>",
                 "<h1>家书集</h1>",
-                f"<div class='info'>生成时间：{now_str}　筛选条件：{filter_desc}</div>",
+                f"<div class='info'>生成时间：{now_str}　筛选条件：{filter_desc}　共 {len(letters)} 条记录</div>",
             ]
 
             for lt in letters:

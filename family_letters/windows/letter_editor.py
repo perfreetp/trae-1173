@@ -288,10 +288,12 @@ class LetterEditor(QWidget):
         batch_row2 = QHBoxLayout()
         self.batch_private_check = QCheckBox("设为私密")
         self.batch_private_check.setStyleSheet("font-size:12px;")
+        self.batch_private_check.stateChanged.connect(self._on_batch_private_toggled)
         batch_row2.addWidget(self.batch_private_check)
 
         self.batch_unprivate_check = QCheckBox("取消私密")
         self.batch_unprivate_check.setStyleSheet("font-size:12px;")
+        self.batch_unprivate_check.stateChanged.connect(self._on_batch_unprivate_toggled)
         batch_row2.addWidget(self.batch_unprivate_check)
 
         self.batch_apply_btn = QPushButton("批量应用")
@@ -849,6 +851,18 @@ class LetterEditor(QWidget):
         self._populate_people_combo(self.sender_combo)
         self._populate_people_combo(self.receiver_combo)
 
+    def _on_batch_private_toggled(self, state):
+        if state:
+            self.batch_unprivate_check.blockSignals(True)
+            self.batch_unprivate_check.setChecked(False)
+            self.batch_unprivate_check.blockSignals(False)
+
+    def _on_batch_unprivate_toggled(self, state):
+        if state:
+            self.batch_private_check.blockSignals(True)
+            self.batch_private_check.setChecked(False)
+            self.batch_private_check.blockSignals(False)
+
     def _on_batch_apply(self):
         selected_rows = self.letter_table.selectionModel().selectedRows()
         if not selected_rows:
@@ -868,6 +882,10 @@ class LetterEditor(QWidget):
         restoration = self.batch_restoration_combo.currentText().strip()
         set_private = self.batch_private_check.isChecked()
         unset_private = self.batch_unprivate_check.isChecked()
+
+        if set_private and unset_private:
+            QMessageBox.warning(self, "提示", "「设为私密」和「取消私密」不能同时勾选，请只选一个。")
+            return
 
         if not category and not restoration and not set_private and not unset_private:
             QMessageBox.information(self, "提示", "请至少选择一项要批量修改的内容。")

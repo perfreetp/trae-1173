@@ -329,7 +329,7 @@ class SearchBorrowWindow(QWidget):
 
         adv_layout.addWidget(QLabel("修复状态："))
         self.restoration_combo = QComboBox()
-        self.restoration_combo.addItems(["全部", "良好", "一般", "需修复"])
+        self.restoration_combo.addItems(["全部", "良好", "轻微损毁", "需修复", "已修复"])
         self.restoration_combo.setMinimumWidth(80)
         adv_layout.addWidget(self.restoration_combo)
 
@@ -415,10 +415,32 @@ class SearchBorrowWindow(QWidget):
         self.dashboard_borrower_table.horizontalHeader().setStretchLastSection(True)
         self.dashboard_borrower_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.dashboard_borrower_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.dashboard_borrower_table.setMaximumHeight(160)
+        self.dashboard_borrower_table.setMaximumHeight(120)
         self.dashboard_borrower_table.setSelectionMode(QTableWidget.SingleSelection)
         self.dashboard_borrower_table.currentCellChanged.connect(self._on_dashboard_borrower_selected)
         dashboard_layout.addWidget(self.dashboard_borrower_table)
+
+        dashboard_layout.addWidget(QLabel("按借出月份分布："))
+        self.dashboard_borrow_month_table = QTableWidget()
+        self.dashboard_borrow_month_table.setColumnCount(4)
+        self.dashboard_borrow_month_table.setHorizontalHeaderLabels(["借出月份", "借出中", "已归还", "逾期"])
+        self.dashboard_borrow_month_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.dashboard_borrow_month_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_borrow_month_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dashboard_borrow_month_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dashboard_borrow_month_table.setMaximumHeight(100)
+        dashboard_layout.addWidget(self.dashboard_borrow_month_table)
+
+        dashboard_layout.addWidget(QLabel("按预计归还月份分布："))
+        self.dashboard_return_month_table = QTableWidget()
+        self.dashboard_return_month_table.setColumnCount(4)
+        self.dashboard_return_month_table.setHorizontalHeaderLabels(["预计归还月份", "借出中", "已归还", "逾期"])
+        self.dashboard_return_month_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.dashboard_return_month_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_return_month_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dashboard_return_month_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dashboard_return_month_table.setMaximumHeight(100)
+        dashboard_layout.addWidget(self.dashboard_return_month_table)
 
         dashboard_layout.addWidget(QLabel("该借阅人借阅记录："))
         self.dashboard_detail_table = QTableWidget()
@@ -799,6 +821,69 @@ class SearchBorrowWindow(QWidget):
             self.dashboard_borrower_table.setItem(i, 3, od_item)
 
         self.dashboard_detail_table.setRowCount(0)
+
+        def _month_key(d):
+            if d and len(d) >= 7:
+                return d[:7]
+            return "未知"
+
+        borrow_month_stats = {}
+        for r in all_records:
+            mk = _month_key(r.get("borrow_date", ""))
+            if mk not in borrow_month_stats:
+                borrow_month_stats[mk] = {"out": 0, "returned": 0, "overdue": 0}
+            if r["status"] == "已归还":
+                borrow_month_stats[mk]["returned"] += 1
+            else:
+                borrow_month_stats[mk]["out"] += 1
+                if r.get("expected_return_date") and r["expected_return_date"] < today:
+                    borrow_month_stats[mk]["overdue"] += 1
+
+        self.dashboard_borrow_month_table.setRowCount(len(borrow_month_stats))
+        for i, (mk, st) in enumerate(sorted(borrow_month_stats.items())):
+            self.dashboard_borrow_month_table.setItem(i, 0, QTableWidgetItem(mk))
+            out_item = QTableWidgetItem(str(st["out"]))
+            out_item.setTextAlignment(Qt.AlignCenter)
+            if st["out"] > 0:
+                out_item.setForeground(QColor("#f39c12"))
+            self.dashboard_borrow_month_table.setItem(i, 1, out_item)
+            ret_item = QTableWidgetItem(str(st["returned"]))
+            ret_item.setTextAlignment(Qt.AlignCenter)
+            self.dashboard_borrow_month_table.setItem(i, 2, ret_item)
+            od_item = QTableWidgetItem(str(st["overdue"]))
+            od_item.setTextAlignment(Qt.AlignCenter)
+            if st["overdue"] > 0:
+                od_item.setForeground(QColor("#e74c3c"))
+            self.dashboard_borrow_month_table.setItem(i, 3, od_item)
+
+        return_month_stats = {}
+        for r in all_records:
+            mk = _month_key(r.get("expected_return_date", ""))
+            if mk not in return_month_stats:
+                return_month_stats[mk] = {"out": 0, "returned": 0, "overdue": 0}
+            if r["status"] == "已归还":
+                return_month_stats[mk]["returned"] += 1
+            else:
+                return_month_stats[mk]["out"] += 1
+                if r.get("expected_return_date") and r["expected_return_date"] < today:
+                    return_month_stats[mk]["overdue"] += 1
+
+        self.dashboard_return_month_table.setRowCount(len(return_month_stats))
+        for i, (mk, st) in enumerate(sorted(return_month_stats.items())):
+            self.dashboard_return_month_table.setItem(i, 0, QTableWidgetItem(mk))
+            out_item = QTableWidgetItem(str(st["out"]))
+            out_item.setTextAlignment(Qt.AlignCenter)
+            if st["out"] > 0:
+                out_item.setForeground(QColor("#f39c12"))
+            self.dashboard_return_month_table.setItem(i, 1, out_item)
+            ret_item = QTableWidgetItem(str(st["returned"]))
+            ret_item.setTextAlignment(Qt.AlignCenter)
+            self.dashboard_return_month_table.setItem(i, 2, ret_item)
+            od_item = QTableWidgetItem(str(st["overdue"]))
+            od_item.setTextAlignment(Qt.AlignCenter)
+            if st["overdue"] > 0:
+                od_item.setForeground(QColor("#e74c3c"))
+            self.dashboard_return_month_table.setItem(i, 3, od_item)
 
         overdue_records = [
             r for r in all_records
