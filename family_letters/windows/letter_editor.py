@@ -253,7 +253,7 @@ class LetterEditor(QWidget):
         )
         self.letter_table.setAlternatingRowColors(True)
         self.letter_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.letter_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.letter_table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.letter_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.letter_table.verticalHeader().setVisible(False)
         self.letter_table.horizontalHeader().setStretchLastSection(True)
@@ -265,6 +265,44 @@ class LetterEditor(QWidget):
         self.letter_table.setColumnWidth(5, 60)
         self.letter_table.cellClicked.connect(self._on_letter_selected)
         layout.addWidget(self.letter_table)
+
+        batch_label = QLabel("批量操作（先勾选多封信件）")
+        batch_label.setStyleSheet("font-weight:bold; font-size:11px; color:#8b7355; padding-top:4px;")
+        layout.addWidget(batch_label)
+
+        batch_row1 = QHBoxLayout()
+        batch_row1.addWidget(QLabel("分类："))
+        self.batch_category_combo = QComboBox()
+        self.batch_category_combo.setEditable(True)
+        self.batch_category_combo.addItems(["", "家书", "公务", "其他"])
+        self.batch_category_combo.setMinimumWidth(80)
+        batch_row1.addWidget(self.batch_category_combo)
+
+        batch_row1.addWidget(QLabel("修复："))
+        self.batch_restoration_combo = QComboBox()
+        self.batch_restoration_combo.addItems(["", "良好", "轻微损毁", "需修复", "已修复"])
+        self.batch_restoration_combo.setMinimumWidth(80)
+        batch_row1.addWidget(self.batch_restoration_combo)
+        layout.addLayout(batch_row1)
+
+        batch_row2 = QHBoxLayout()
+        self.batch_private_check = QCheckBox("设为私密")
+        self.batch_private_check.setStyleSheet("font-size:12px;")
+        batch_row2.addWidget(self.batch_private_check)
+
+        self.batch_unprivate_check = QCheckBox("取消私密")
+        self.batch_unprivate_check.setStyleSheet("font-size:12px;")
+        batch_row2.addWidget(self.batch_unprivate_check)
+
+        self.batch_apply_btn = QPushButton("批量应用")
+        self.batch_apply_btn.setFixedHeight(28)
+        self.batch_apply_btn.setStyleSheet(
+            "QPushButton{background:#b8784e;color:#fdf8f0;font-size:12px;padding:4px 10px;}"
+            "QPushButton:hover{background:#a06040;}"
+        )
+        self.batch_apply_btn.clicked.connect(self._on_batch_apply)
+        batch_row2.addWidget(self.batch_apply_btn)
+        layout.addLayout(batch_row2)
 
         return widget
 
@@ -811,6 +849,73 @@ class LetterEditor(QWidget):
         self._populate_people_combo(self.sender_combo)
         self._populate_people_combo(self.receiver_combo)
 
+    def _on_batch_apply(self):
+        selected_rows = self.letter_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "提示", "请先在左侧列表中选择一封或多封信件。")
+            return
+
+        letter_ids = []
+        for idx in selected_rows:
+            id_item = self.letter_table.item(idx.row(), 0)
+            if id_item:
+                letter_ids.append(int(id_item.text()))
+
+        if not letter_ids:
+            return
+
+        category = self.batch_category_combo.currentText().strip()
+        restoration = self.batch_restoration_combo.currentText().strip()
+        set_private = self.batch_private_check.isChecked()
+        unset_private = self.batch_unprivate_check.isChecked()
+
+        if not category and not restoration and not set_private and not unset_private:
+            QMessageBox.information(self, "提示", "请至少选择一项要批量修改的内容。")
+            return
+
+        changes = []
+        if category:
+            changes.append(f"分类 → {category}")
+        if restoration:
+            changes.append(f"修复状态 → {restoration}")
+        if set_private:
+            changes.append("设为私密")
+        if unset_private:
+            changes.append("取消私密")
+
+        reply = QMessageBox.question(
+            self, "确认批量操作",
+            f"已选中 {len(letter_ids)} 封信件，将执行以下修改：\n\n"
+            + "\n".join(f"  · {c}" for c in changes)
+            + "\n\n确认应用？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        for lid in letter_ids:
+            sets = []
+            params = []
+            if category:
+                sets.append("category = ?")
+                params.append(category)
+            if restoration:
+                sets.append("restoration_status = ?")
+                params.append(restoration)
+            if set_private:
+                sets.append("is_private = 1")
+            if unset_private:
+                sets.append("is_private = 0")
+            if sets:
+                sets.append("updated_at = datetime('now','localtime')")
+                sql = f"UPDATE letters SET {', '.join(sets)} WHERE id = ?"
+                params.append(lid)
+                execute_update(sql, tuple(params))
+
+        self._load_letter_list()
+        self.data_changed.emit()
+        QMessageBox.information(self, "批量操作完成", f"已更新 {len(letter_ids)} 封信件。")
+
     def _resolve_person_id(self, combo):
         text = combo.currentText().strip()
         if not text:
@@ -818,7 +923,8 @@ class LetterEditor(QWidget):
         idx = combo.currentIndex()
         if idx >= 0:
             pid = combo.itemData(idx)
-            if pid and pid != -1 and combo.currentText() == text:
+            item_text = combo.itemText(idx) if idx < combo.count() else ""
+            if pid and pid != -1 and item_text == text:
                 return pid
         existing = execute_query_returning("SELECT id FROM people WHERE name = ?", (text,))
         if existing:

@@ -251,11 +251,13 @@ class SearchBorrowWindow(QWidget):
         self.setWindowTitle("检索借阅")
         self.setMinimumSize(1100, 800)
         self.setStyleSheet(STYLESHEET)
+        self._saved_filters = {}
         self._setup_ui()
         self._load_combo_data()
         self._do_search()
         self._refresh_borrow_table()
         self._update_statistics()
+        self._refresh_dashboard()
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -372,6 +374,12 @@ class SearchBorrowWindow(QWidget):
         btn_bar.addStretch()
         borrow_layout.addLayout(btn_bar)
 
+        borrow_splitter = QSplitter(Qt.Horizontal)
+
+        borrow_left = QWidget()
+        borrow_left_layout = QVBoxLayout(borrow_left)
+        borrow_left_layout.setContentsMargins(0, 0, 0, 0)
+
         self.borrow_table = QTableWidget()
         self.borrow_table.setColumnCount(8)
         self.borrow_table.setHorizontalHeaderLabels(
@@ -382,7 +390,64 @@ class SearchBorrowWindow(QWidget):
         self.borrow_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.borrow_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.borrow_table.setAlternatingRowColors(True)
-        borrow_layout.addWidget(self.borrow_table)
+        borrow_left_layout.addWidget(self.borrow_table)
+
+        borrow_splitter.addWidget(borrow_left)
+
+        dashboard_widget = QWidget()
+        dashboard_layout = QVBoxLayout(dashboard_widget)
+        dashboard_layout.setContentsMargins(4, 0, 0, 0)
+
+        dash_title = QLabel("借阅看板")
+        dash_title.setStyleSheet("font-weight:bold; font-size:14px; color:#2c3e50; padding:4px 0;")
+        dashboard_layout.addWidget(dash_title)
+
+        self.dashboard_summary = QLabel("")
+        self.dashboard_summary.setStyleSheet("padding:4px 8px; background:#ecf0f1; border-radius:4px; font-size:12px;")
+        self.dashboard_summary.setWordWrap(True)
+        dashboard_layout.addWidget(self.dashboard_summary)
+
+        dashboard_layout.addWidget(QLabel("按借阅人分布："))
+        self.dashboard_borrower_table = QTableWidget()
+        self.dashboard_borrower_table.setColumnCount(4)
+        self.dashboard_borrower_table.setHorizontalHeaderLabels(["借阅人", "借出中", "已归还", "逾期"])
+        self.dashboard_borrower_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.dashboard_borrower_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_borrower_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dashboard_borrower_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dashboard_borrower_table.setMaximumHeight(160)
+        self.dashboard_borrower_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.dashboard_borrower_table.currentCellChanged.connect(self._on_dashboard_borrower_selected)
+        dashboard_layout.addWidget(self.dashboard_borrower_table)
+
+        dashboard_layout.addWidget(QLabel("该借阅人借阅记录："))
+        self.dashboard_detail_table = QTableWidget()
+        self.dashboard_detail_table.setColumnCount(5)
+        self.dashboard_detail_table.setHorizontalHeaderLabels(["家书", "借阅日期", "预计归还", "实际归还", "状态"])
+        self.dashboard_detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.dashboard_detail_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_detail_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dashboard_detail_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dashboard_detail_table.setMaximumHeight(140)
+        dashboard_layout.addWidget(self.dashboard_detail_table)
+
+        dash_overdue_label = QLabel("逾期记录：")
+        dash_overdue_label.setStyleSheet("color:#e74c3c; font-weight:bold;")
+        dashboard_layout.addWidget(dash_overdue_label)
+        self.dashboard_overdue_table = QTableWidget()
+        self.dashboard_overdue_table.setColumnCount(5)
+        self.dashboard_overdue_table.setHorizontalHeaderLabels(["家书", "借阅人", "借阅日期", "预计归还", "逾期天数"])
+        self.dashboard_overdue_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.dashboard_overdue_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_overdue_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dashboard_overdue_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dashboard_overdue_table.setMaximumHeight(120)
+        dashboard_layout.addWidget(self.dashboard_overdue_table)
+
+        borrow_splitter.addWidget(dashboard_widget)
+        borrow_splitter.setSizes([500, 350])
+
+        borrow_layout.addWidget(borrow_splitter)
 
         splitter.addWidget(borrow_group)
         splitter.setStretchFactor(0, 3)
@@ -575,6 +640,7 @@ class SearchBorrowWindow(QWidget):
             self._refresh_borrow_table()
             self._update_statistics()
             self._do_search()
+            self._refresh_dashboard()
             self.data_changed.emit()
 
     def _on_register_return(self):
@@ -603,6 +669,7 @@ class SearchBorrowWindow(QWidget):
             self._refresh_borrow_table()
             self._update_statistics()
             self._do_search()
+            self._refresh_dashboard()
             self.data_changed.emit()
 
     def _on_delete_record(self):
@@ -622,6 +689,7 @@ class SearchBorrowWindow(QWidget):
             self._refresh_borrow_table()
             self._update_statistics()
             self._do_search()
+            self._refresh_dashboard()
             self.data_changed.emit()
 
     def _on_borrow_from_result(self):
@@ -659,6 +727,7 @@ class SearchBorrowWindow(QWidget):
             self._refresh_borrow_table()
             self._update_statistics()
             self._do_search()
+            self._refresh_dashboard()
             self.data_changed.emit()
 
     def _update_statistics(self):
@@ -678,8 +747,164 @@ class SearchBorrowWindow(QWidget):
             f"借阅统计 ｜ 总计：{total} 条 ｜ 借出中：{out} 条 ｜ 逾期：{overdue} 条"
         )
 
+    def _refresh_dashboard(self):
+        all_records = execute_query_returning(
+            "SELECT br.*, l.title as letter_title "
+            "FROM borrow_records br LEFT JOIN letters l ON br.letter_id = l.id"
+        )
+        today = date.today().isoformat()
+
+        out_count = sum(1 for r in all_records if r["status"] == "借出")
+        returned_count = sum(1 for r in all_records if r["status"] == "已归还")
+        overdue_count = sum(
+            1 for r in all_records
+            if r["status"] == "借出"
+            and r.get("expected_return_date")
+            and r["expected_return_date"] < today
+        )
+        self.dashboard_summary.setText(
+            f"总借阅 {len(all_records)} 笔 ｜ 借出中 {out_count} ｜ "
+            f"已归还 {returned_count} ｜ 逾期 {overdue_count}"
+        )
+
+        borrower_stats = {}
+        for r in all_records:
+            name = r.get("borrower_name", "")
+            if not name:
+                continue
+            if name not in borrower_stats:
+                borrower_stats[name] = {"out": 0, "returned": 0, "overdue": 0}
+            if r["status"] == "已归还":
+                borrower_stats[name]["returned"] += 1
+            else:
+                borrower_stats[name]["out"] += 1
+                if r.get("expected_return_date") and r["expected_return_date"] < today:
+                    borrower_stats[name]["overdue"] += 1
+
+        self.dashboard_borrower_table.setRowCount(len(borrower_stats))
+        for i, (name, st) in enumerate(sorted(borrower_stats.items())):
+            self.dashboard_borrower_table.setItem(i, 0, QTableWidgetItem(name))
+            out_item = QTableWidgetItem(str(st["out"]))
+            out_item.setTextAlignment(Qt.AlignCenter)
+            if st["out"] > 0:
+                out_item.setForeground(QColor("#f39c12"))
+            self.dashboard_borrower_table.setItem(i, 1, out_item)
+            ret_item = QTableWidgetItem(str(st["returned"]))
+            ret_item.setTextAlignment(Qt.AlignCenter)
+            self.dashboard_borrower_table.setItem(i, 2, ret_item)
+            od_item = QTableWidgetItem(str(st["overdue"]))
+            od_item.setTextAlignment(Qt.AlignCenter)
+            if st["overdue"] > 0:
+                od_item.setForeground(QColor("#e74c3c"))
+            self.dashboard_borrower_table.setItem(i, 3, od_item)
+
+        self.dashboard_detail_table.setRowCount(0)
+
+        overdue_records = [
+            r for r in all_records
+            if r["status"] == "借出"
+            and r.get("expected_return_date")
+            and r["expected_return_date"] < today
+        ]
+        self.dashboard_overdue_table.setRowCount(len(overdue_records))
+        for i, r in enumerate(overdue_records):
+            self.dashboard_overdue_table.setItem(i, 0, QTableWidgetItem(r.get("letter_title", "")))
+            self.dashboard_overdue_table.setItem(i, 1, QTableWidgetItem(r.get("borrower_name", "")))
+            self.dashboard_overdue_table.setItem(i, 2, QTableWidgetItem(r.get("borrow_date", "")))
+            self.dashboard_overdue_table.setItem(i, 3, QTableWidgetItem(r.get("expected_return_date", "")))
+            try:
+                exp_date = r.get("expected_return_date", "")
+                days = (date.today() - date.fromisoformat(exp_date)).days if exp_date else 0
+            except Exception:
+                days = 0
+            days_item = QTableWidgetItem(f"{days} 天")
+            days_item.setTextAlignment(Qt.AlignCenter)
+            days_item.setForeground(QColor("#e74c3c"))
+            self.dashboard_overdue_table.setItem(i, 4, days_item)
+
+    def _on_dashboard_borrower_selected(self, row, col, prev_row, prev_col):
+        if row < 0:
+            self.dashboard_detail_table.setRowCount(0)
+            return
+        name_item = self.dashboard_borrower_table.item(row, 0)
+        if not name_item:
+            return
+        borrower_name = name_item.text()
+        records = execute_query_returning(
+            "SELECT br.*, l.title as letter_title "
+            "FROM borrow_records br LEFT JOIN letters l ON br.letter_id = l.id "
+            "WHERE br.borrower_name = ? ORDER BY br.borrow_date DESC",
+            (borrower_name,)
+        )
+        today = date.today().isoformat()
+        self.dashboard_detail_table.setRowCount(len(records))
+        for i, r in enumerate(records):
+            self.dashboard_detail_table.setItem(i, 0, QTableWidgetItem(r.get("letter_title", "")))
+            self.dashboard_detail_table.setItem(i, 1, QTableWidgetItem(r.get("borrow_date", "")))
+            self.dashboard_detail_table.setItem(i, 2, QTableWidgetItem(r.get("expected_return_date", "")))
+            self.dashboard_detail_table.setItem(i, 3, QTableWidgetItem(r.get("return_date", "")))
+            status = r.get("status", "")
+            if status == "借出" and r.get("expected_return_date") and r["expected_return_date"] < today:
+                status = "逾期"
+            status_item = QTableWidgetItem(status)
+            status_item.setTextAlignment(Qt.AlignCenter)
+            if status == "逾期":
+                status_item.setForeground(QColor("#e74c3c"))
+            elif status == "借出":
+                status_item.setForeground(QColor("#f39c12"))
+            elif status == "已归还":
+                status_item.setForeground(QColor("#27ae60"))
+            self.dashboard_detail_table.setItem(i, 4, status_item)
+
+    def _save_filter_state(self):
+        self._saved_filters = {
+            "keyword": self.search_input.text(),
+            "sender_id": self.sender_combo.currentData(),
+            "sender_text": self.sender_combo.currentText(),
+            "receiver_id": self.receiver_combo.currentData(),
+            "receiver_text": self.receiver_combo.currentText(),
+            "category_data": self.category_combo.currentData(),
+            "category_text": self.category_combo.currentText(),
+            "private": self.private_check.isChecked(),
+            "date_filter": self.date_filter_check.isChecked(),
+            "restoration": self.restoration_combo.currentText(),
+        }
+
+    def _restore_filter_state(self):
+        f = self._saved_filters
+        if not f:
+            return
+        self.search_input.setText(f.get("keyword", ""))
+        self.private_check.setChecked(f.get("private", False))
+        self.date_filter_check.setChecked(f.get("date_filter", False))
+        restoration = f.get("restoration", "全部")
+        idx = self.restoration_combo.findText(restoration)
+        if idx >= 0:
+            self.restoration_combo.setCurrentIndex(idx)
+        sender_id = f.get("sender_id")
+        if sender_id is not None:
+            for i in range(self.sender_combo.count()):
+                if self.sender_combo.itemData(i) == sender_id:
+                    self.sender_combo.setCurrentIndex(i)
+                    break
+        receiver_id = f.get("receiver_id")
+        if receiver_id is not None:
+            for i in range(self.receiver_combo.count()):
+                if self.receiver_combo.itemData(i) == receiver_id:
+                    self.receiver_combo.setCurrentIndex(i)
+                    break
+        cat_data = f.get("category_data")
+        if cat_data is not None:
+            for i in range(self.category_combo.count()):
+                if self.category_combo.itemData(i) == cat_data:
+                    self.category_combo.setCurrentIndex(i)
+                    break
+
     def refresh(self):
+        self._save_filter_state()
         self._load_combo_data()
+        self._restore_filter_state()
         self._do_search()
         self._refresh_borrow_table()
         self._update_statistics()
+        self._refresh_dashboard()

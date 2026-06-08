@@ -485,6 +485,33 @@ class BackupHandoverWindow(QWidget):
             ORDER BY l.send_date, l.id
         """)
 
+    def _get_filtered_handover_letters(self):
+        rows = execute_query_returning("""
+            SELECT l.*, p1.name AS sender_name, p2.name AS receiver_name,
+                   COALESCE(br.status, '无') AS borrow_status
+            FROM letters l
+            LEFT JOIN people p1 ON l.sender_id = p1.id
+            LEFT JOIN people p2 ON l.receiver_id = p2.id
+            LEFT JOIN (
+                SELECT letter_id, status FROM borrow_records
+                WHERE id IN (SELECT MAX(id) FROM borrow_records GROUP BY letter_id)
+            ) br ON br.letter_id = l.id
+            ORDER BY l.send_date, l.id
+        """)
+
+        borrow_filter = self.filter_borrow_combo.currentText()
+        if borrow_filter != "全部":
+            rows = [r for r in rows if r.get("borrow_status", "无") == borrow_filter]
+
+        restoration_filter = self.filter_restoration_combo.currentText()
+        if restoration_filter != "全部":
+            rows = [r for r in rows if r.get("restoration_status", "") == restoration_filter]
+
+        if self.filter_private_check.isChecked():
+            rows = [r for r in rows if r.get("is_private")]
+
+        return rows
+
     def _export_excel(self):
         if not HAS_OPENPYXL:
             QMessageBox.warning(self, "缺少依赖", "未安装 openpyxl 库，无法导出 Excel。\n请运行：pip install openpyxl")
@@ -498,7 +525,7 @@ class BackupHandoverWindow(QWidget):
             return
 
         try:
-            letters = self._get_all_letters()
+            letters = self._get_filtered_handover_letters()
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "家书集"
@@ -600,9 +627,12 @@ class BackupHandoverWindow(QWidget):
             )
 
             story = []
-            letters = self._get_all_letters()
+            letters = self._get_filtered_handover_letters()
+            filter_desc = self._get_handover_filter_desc()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             story.append(Paragraph("家书集", title_style))
+            story.append(Paragraph(f"生成时间：{now_str}　筛选条件：{filter_desc}　共 {len(letters)} 条", meta_style))
             story.append(Spacer(1, 0.5*cm))
 
             for lt in letters:
@@ -654,7 +684,7 @@ class BackupHandoverWindow(QWidget):
             return
 
         try:
-            letters = self._get_all_letters()
+            letters = self._get_filtered_handover_letters()
             filter_desc = self._get_handover_filter_desc()
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             html_parts = [
