@@ -203,6 +203,7 @@ class PhotoThumbnail(QFrame):
 
 class LetterEditor(QWidget):
     letter_deleted = pyqtSignal()
+    data_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -704,8 +705,8 @@ class LetterEditor(QWidget):
             QMessageBox.warning(self, "提示", "请先选择一封信件")
             return
 
-        sender_id = self.sender_combo.currentData()
-        receiver_id = self.receiver_combo.currentData()
+        sender_id = self._resolve_person_id(self.sender_combo)
+        receiver_id = self._resolve_person_id(self.receiver_combo)
         is_private = 1 if self.private_checkbox.isChecked() else 0
         restoration_status = self.restoration_combo.currentText()
 
@@ -721,8 +722,8 @@ class LetterEditor(QWidget):
             WHERE id = ?
         """, (
             self.title_edit.text(),
-            sender_id if sender_id and sender_id != -1 else None,
-            receiver_id if receiver_id and receiver_id != -1 else None,
+            sender_id,
+            receiver_id,
             self.send_date_edit.text(),
             self.receive_date_edit.text(),
             self.send_location_edit.text(),
@@ -738,6 +739,7 @@ class LetterEditor(QWidget):
 
         self._save_photo_descriptions()
         self._load_letter_list()
+        self.data_changed.emit()
         QMessageBox.information(self, "保存成功", "信件修改已保存")
 
     def _save_photo_descriptions(self):
@@ -763,6 +765,7 @@ class LetterEditor(QWidget):
             self._clear_form()
             self._load_letter_list()
             self.letter_deleted.emit()
+            self.data_changed.emit()
             QMessageBox.information(self, "已删除", "信件已删除")
 
     def _clear_form(self):
@@ -790,3 +793,30 @@ class LetterEditor(QWidget):
         super().resizeEvent(event)
         if self._private_overlay and self._private_overlay._visible:
             self._private_overlay.update_geometry()
+
+    def refresh(self):
+        self._load_letter_list()
+        self._populate_people_combo(self.sender_combo)
+        self._populate_people_combo(self.receiver_combo)
+
+    def _resolve_person_id(self, combo):
+        text = combo.currentText().strip()
+        if not text:
+            return None
+        idx = combo.currentIndex()
+        if idx >= 0:
+            pid = combo.itemData(idx)
+            if pid and pid != -1 and combo.currentText() == text:
+                return pid
+        existing = execute_query_returning("SELECT id FROM people WHERE name = ?", (text,))
+        if existing:
+            return existing[0]["id"]
+        new_id = execute_query("INSERT INTO people (name) VALUES (?)", (text,))
+        self._populate_people_combo(combo)
+        other = self.receiver_combo if combo is self.sender_combo else self.sender_combo
+        self._populate_people_combo(other)
+        for i in range(combo.count()):
+            if combo.itemData(i) == new_id:
+                combo.setCurrentIndex(i)
+                break
+        return new_id

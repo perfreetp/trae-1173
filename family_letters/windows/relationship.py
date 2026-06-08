@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QDialog, QFormLayout, QComboBox, QLineEdit, QTextEdit,
     QGroupBox, QHeaderView, QMessageBox, QAbstractItemView, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QRectF, QPointF
+from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
 
 from database import execute_query, execute_query_returning, execute_update
@@ -370,6 +370,8 @@ class RelationshipGraphWidget(QWidget):
 
 
 class RelationshipWindow(QWidget):
+    data_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("人物关系")
@@ -547,6 +549,7 @@ class RelationshipWindow(QWidget):
                  data["alias_name"], data["notes"])
             )
             self._refresh_all()
+            self.data_changed.emit()
 
     def _on_edit_person(self):
         row = self.people_table.currentRow()
@@ -570,6 +573,7 @@ class RelationshipWindow(QWidget):
                  data["alias_name"], data["notes"], person["id"])
             )
             self._refresh_all()
+            self.data_changed.emit()
 
     def _on_delete_person(self):
         row = self.people_table.currentRow()
@@ -580,6 +584,40 @@ class RelationshipWindow(QWidget):
         if row >= len(people):
             return
         person = people[row]
+
+        sender_letters = execute_query_returning(
+            "SELECT id, title FROM letters WHERE sender_id = ?", (person["id"],)
+        )
+        receiver_letters = execute_query_returning(
+            "SELECT id, title FROM letters WHERE receiver_id = ?", (person["id"],)
+        )
+
+        if sender_letters or receiver_letters:
+            related_count = len(sender_letters) + len(receiver_letters)
+            detail_lines = []
+            for lt in sender_letters[:5]:
+                detail_lines.append(f"  · [ID:{lt['id']}] {lt['title'] or '无标题'} （作为寄信人）")
+            for lt in receiver_letters[:5]:
+                detail_lines.append(f"  · [ID:{lt['id']}] {lt['title'] or '无标题'} （作为收信人）")
+            if related_count > 5:
+                detail_lines.append(f"  ……等共 {related_count} 封信件")
+            detail = "\n".join(detail_lines)
+
+            reply = QMessageBox.question(
+                self, "人物被信件引用",
+                f"人物「{person['name']}」被 {related_count} 封信件引用：\n\n{detail}\n\n"
+                f"如果继续删除，这些信件的关联人物将被清空。\n"
+                f"是否继续删除？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                execute_update("UPDATE letters SET sender_id = NULL WHERE sender_id = ?", (person["id"],))
+                execute_update("UPDATE letters SET receiver_id = NULL WHERE receiver_id = ?", (person["id"],))
+                execute_update("DELETE FROM people WHERE id=?", (person["id"],))
+                self._refresh_all()
+                self.data_changed.emit()
+            return
+
         reply = QMessageBox.question(
             self, "确认删除",
             f"确定要删除人物「{person['name']}」吗？相关关系也会被删除。",
@@ -588,6 +626,7 @@ class RelationshipWindow(QWidget):
         if reply == QMessageBox.Yes:
             execute_update("DELETE FROM people WHERE id=?", (person["id"],))
             self._refresh_all()
+            self.data_changed.emit()
 
     def _on_add_relation(self):
         people = getattr(self, "_cached_people", [])
@@ -603,6 +642,7 @@ class RelationshipWindow(QWidget):
                 (data["person1_id"], data["person2_id"], data["relation_type"], data["notes"])
             )
             self._refresh_all()
+            self.data_changed.emit()
 
     def _on_delete_relation(self):
         row = self.rel_table.currentRow()
@@ -621,3 +661,7 @@ class RelationshipWindow(QWidget):
         if reply == QMessageBox.Yes:
             execute_update("DELETE FROM relationships WHERE id=?", (rel["id"],))
             self._refresh_all()
+            self.data_changed.emit()
+
+    def refresh(self):
+        self._refresh_all()

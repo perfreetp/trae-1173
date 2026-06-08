@@ -185,6 +185,8 @@ class EnvelopeItemWidget(QWidget):
 
 
 class ScanImportWindow(QWidget):
+    data_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.photo_paths = []
@@ -593,6 +595,7 @@ class ScanImportWindow(QWidget):
             f"信封票据：{saved_envelopes} 项"
         )
         self._clear_form()
+        self.data_changed.emit()
 
     def _get_person_id(self, combo):
         text = combo.currentText().strip()
@@ -609,6 +612,9 @@ class ScanImportWindow(QWidget):
         new_id = execute_query("INSERT INTO people (name) VALUES (?)", (text,))
         self._load_people()
         return new_id
+
+    def refresh(self):
+        self._load_people()
 
     def _clear_form(self):
         self.title_edit.clear()

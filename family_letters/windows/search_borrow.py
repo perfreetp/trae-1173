@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QMessageBox,
     QGroupBox, QTextEdit, QSplitter, QAbstractItemView, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtCore import Qt, QDate, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
 
 from database import execute_query, execute_query_returning, execute_update, search_letters
@@ -244,6 +244,8 @@ class BorrowDialog(QDialog):
 
 
 class SearchBorrowWindow(QWidget):
+    data_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("检索借阅")
@@ -311,6 +313,10 @@ class SearchBorrowWindow(QWidget):
 
         self.private_check = QCheckBox("仅私密")
         adv_layout.addWidget(self.private_check)
+
+        self.date_filter_check = QCheckBox("启用日期筛选")
+        self.date_filter_check.setChecked(False)
+        adv_layout.addWidget(self.date_filter_check)
 
         adv_layout.addWidget(QLabel("修复状态："))
         self.restoration_combo = QComboBox()
@@ -420,13 +426,14 @@ class SearchBorrowWindow(QWidget):
         if receiver_id is not None:
             results = [r for r in results if r.get("receiver_id") == receiver_id]
 
-        date_from_str = self.date_from.date().toString("yyyy-MM-dd")
-        date_to_str = self.date_to.date().toString("yyyy-MM-dd")
-        results = [
-            r for r in results
-            if r.get("send_date")
-            and date_from_str <= r["send_date"] <= date_to_str
-        ]
+        if self.date_filter_check.isChecked():
+            date_from_str = self.date_from.date().toString("yyyy-MM-dd")
+            date_to_str = self.date_to.date().toString("yyyy-MM-dd")
+            results = [
+                r for r in results
+                if not r.get("send_date")
+                or (date_from_str <= r["send_date"] <= date_to_str)
+            ]
 
         category = self.category_combo.currentData()
         if category is not None:
@@ -591,3 +598,8 @@ class SearchBorrowWindow(QWidget):
         self.stats_label.setText(
             f"借阅统计 ｜ 总计：{total} 条 ｜ 借出中：{out} 条 ｜ 逾期：{overdue} 条"
         )
+
+    def refresh(self):
+        self._load_combo_data()
+        self._refresh_borrow_table()
+        self._update_statistics()

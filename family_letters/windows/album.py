@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QTextEdit, QComboBox, QScrollArea, QMessageBox, QFileDialog,
     QSizePolicy, QFrame, QSplitter
 )
-from PyQt5.QtCore import Qt, QSize, QRect, QPoint
+from PyQt5.QtCore import Qt, QSize, QRect, QPoint, pyqtSignal
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QLinearGradient
 
 from database import execute_query, execute_query_returning, execute_update
@@ -281,6 +281,8 @@ class TimelineWidget(QWidget):
 
 
 class AlbumWindow(QWidget):
+    data_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_album_id = None
@@ -768,3 +770,6 @@ body {{
             QMessageBox.information(self, "导出成功", f"相册已导出到：\n{save_path}")
         except Exception as e:
             QMessageBox.critical(self, "导出失败", f"导出时出错：\n{e}")
+
+    def refresh(self):
+        self._load_albums()

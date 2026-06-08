@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTextEdit, QFileDialog,
     QHeaderView, QLabel, QProgressBar, QMessageBox, QAbstractItemView,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush, QPen
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -174,6 +174,8 @@ class BarChartWidget(QWidget):
 
 
 class BackupHandoverWindow(QWidget):
+    data_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("备份交接")
@@ -869,3 +871,8 @@ class BackupHandoverWindow(QWidget):
             if os.path.exists(f):
                 return f
         return None
+
+    def refresh(self):
+        self._refresh_backup_list()
+        self._refresh_handover_table()
+        self._refresh_statistics()
