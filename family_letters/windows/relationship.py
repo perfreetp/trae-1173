@@ -371,6 +371,7 @@ class RelationshipGraphWidget(QWidget):
 
 class RelationshipWindow(QWidget):
     data_changed = pyqtSignal()
+    navigate_to_letter = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -402,6 +403,7 @@ class RelationshipWindow(QWidget):
         self.people_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.people_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.people_table.setAlternatingRowColors(True)
+        self.people_table.currentCellChanged.connect(self._on_person_selected)
         people_layout.addWidget(self.people_table)
 
         btn_layout = QHBoxLayout()
@@ -474,7 +476,58 @@ class RelationshipWindow(QWidget):
         right_layout.addWidget(stat_group)
 
         splitter.addWidget(right_widget)
-        splitter.setSizes([380, 720])
+
+        detail_widget = QWidget()
+        detail_layout = QVBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+
+        detail_group = QGroupBox("人物详情")
+        detail_inner = QVBoxLayout(detail_group)
+
+        self.detail_name_label = QLabel("← 点击人物查看详情")
+        self.detail_name_label.setStyleSheet("font-size:16px; font-weight:bold; color:#1a73e8; padding:6px 0;")
+        detail_inner.addWidget(self.detail_name_label)
+
+        self.detail_info_label = QLabel("")
+        self.detail_info_label.setStyleSheet("color:#555; font-size:12px; padding:2px 0;")
+        self.detail_info_label.setWordWrap(True)
+        detail_inner.addWidget(self.detail_info_label)
+
+        detail_inner.addWidget(QLabel("寄出的信："))
+        self.detail_sent_table = QTableWidget()
+        self.detail_sent_table.setColumnCount(3)
+        self.detail_sent_table.setHorizontalHeaderLabels(["ID", "标题", "日期"])
+        self.detail_sent_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.detail_sent_table.horizontalHeader().setStretchLastSection(True)
+        self.detail_sent_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.detail_sent_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.detail_sent_table.setMaximumHeight(140)
+        self.detail_sent_table.doubleClicked.connect(self._on_detail_letter_double_clicked)
+        detail_inner.addWidget(self.detail_sent_table)
+
+        detail_inner.addWidget(QLabel("收到的信："))
+        self.detail_received_table = QTableWidget()
+        self.detail_received_table.setColumnCount(3)
+        self.detail_received_table.setHorizontalHeaderLabels(["ID", "标题", "日期"])
+        self.detail_received_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.detail_received_table.horizontalHeader().setStretchLastSection(True)
+        self.detail_received_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.detail_received_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.detail_received_table.setMaximumHeight(140)
+        self.detail_received_table.doubleClicked.connect(self._on_detail_letter_double_clicked)
+        detail_inner.addWidget(self.detail_received_table)
+
+        detail_inner.addWidget(QLabel("关系："))
+        self.detail_rel_label = QLabel("")
+        self.detail_rel_label.setWordWrap(True)
+        self.detail_rel_label.setStyleSheet("color:#555; font-size:12px; padding:4px; background:#f5f7fa; border-radius:4px;")
+        detail_inner.addWidget(self.detail_rel_label)
+
+        detail_inner.addStretch()
+        detail_layout.addWidget(detail_group)
+
+        splitter.addWidget(detail_widget)
+        splitter.setSizes([320, 520, 260])
         main_layout.addWidget(splitter)
 
     def _refresh_all(self):
@@ -665,3 +718,69 @@ class RelationshipWindow(QWidget):
 
     def refresh(self):
         self._refresh_all()
+
+    def _on_person_selected(self, row, col, prev_row, prev_col):
+        people = getattr(self, "_cached_people", [])
+        if row < 0 or row >= len(people):
+            self.detail_name_label.setText("← 点击人物查看详情")
+            self.detail_info_label.setText("")
+            self.detail_sent_table.setRowCount(0)
+            self.detail_received_table.setRowCount(0)
+            self.detail_rel_label.setText("")
+            return
+        person = people[row]
+        self.detail_name_label.setText(person.get("name", ""))
+
+        info_parts = []
+        if person.get("gender"):
+            info_parts.append(f"性别：{person['gender']}")
+        if person.get("birth_year"):
+            info_parts.append(f"生：{person['birth_year']}")
+        if person.get("death_year"):
+            info_parts.append(f"卒：{person['death_year']}")
+        if person.get("alias_name"):
+            info_parts.append(f"别名：{person['alias_name']}")
+        self.detail_info_label.setText("　".join(info_parts))
+
+        sent = execute_query_returning(
+            "SELECT id, title, send_date FROM letters WHERE sender_id = ? ORDER BY send_date DESC",
+            (person["id"],)
+        )
+        self.detail_sent_table.setRowCount(len(sent))
+        for i, lt in enumerate(sent):
+            self.detail_sent_table.setItem(i, 0, QTableWidgetItem(str(lt["id"])))
+            self.detail_sent_table.setItem(i, 1, QTableWidgetItem(lt.get("title", "") or ""))
+            self.detail_sent_table.setItem(i, 2, QTableWidgetItem(lt.get("send_date", "") or ""))
+
+        received = execute_query_returning(
+            "SELECT id, title, send_date FROM letters WHERE receiver_id = ? ORDER BY send_date DESC",
+            (person["id"],)
+        )
+        self.detail_received_table.setRowCount(len(received))
+        for i, lt in enumerate(received):
+            self.detail_received_table.setItem(i, 0, QTableWidgetItem(str(lt["id"])))
+            self.detail_received_table.setItem(i, 1, QTableWidgetItem(lt.get("title", "") or ""))
+            self.detail_received_table.setItem(i, 2, QTableWidgetItem(lt.get("send_date", "") or ""))
+
+        rels = execute_query_returning(
+            "SELECT r.relation_type, p.name AS other_name "
+            "FROM relationships r "
+            "LEFT JOIN people p ON (CASE WHEN r.person1_id = ? THEN r.person2_id ELSE r.person1_id END) = p.id "
+            "WHERE r.person1_id = ? OR r.person2_id = ?",
+            (person["id"], person["id"], person["id"])
+        )
+        rel_lines = []
+        for r in rels:
+            rel_lines.append(f"· {r.get('other_name', '?')} — {r['relation_type']}")
+        self.detail_rel_label.setText("\n".join(rel_lines) if rel_lines else "暂无关系记录")
+
+    def _on_detail_letter_double_clicked(self, index):
+        table = self.sender()
+        if not table:
+            return
+        row = index.row()
+        id_item = table.item(row, 0)
+        if not id_item:
+            return
+        letter_id = int(id_item.text())
+        self.navigate_to_letter.emit(letter_id)

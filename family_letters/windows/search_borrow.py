@@ -253,6 +253,7 @@ class SearchBorrowWindow(QWidget):
         self.setStyleSheet(STYLESHEET)
         self._setup_ui()
         self._load_combo_data()
+        self._do_search()
         self._refresh_borrow_table()
         self._update_statistics()
 
@@ -277,6 +278,12 @@ class SearchBorrowWindow(QWidget):
         self.search_btn.setFixedWidth(100)
         self.search_btn.clicked.connect(self._do_search)
         top_bar.addWidget(self.search_btn)
+
+        self.borrow_from_result_btn = QPushButton("登记借阅")
+        self.borrow_from_result_btn.setObjectName("btnSuccess")
+        self.borrow_from_result_btn.setFixedWidth(100)
+        self.borrow_from_result_btn.clicked.connect(self._on_borrow_from_result)
+        top_bar.addWidget(self.borrow_from_result_btn)
         search_layout.addLayout(top_bar)
 
         adv_layout = QHBoxLayout()
@@ -328,9 +335,9 @@ class SearchBorrowWindow(QWidget):
         search_layout.addLayout(adv_layout)
 
         self.search_table = QTableWidget()
-        self.search_table.setColumnCount(8)
+        self.search_table.setColumnCount(9)
         self.search_table.setHorizontalHeaderLabels(
-            ["ID", "标题", "寄信人", "收信人", "日期", "地点", "内容预览", "私密"]
+            ["ID", "标题", "寄信人", "收信人", "日期", "地点", "内容预览", "私密", "借阅状态"]
         )
         self.search_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.search_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
@@ -391,6 +398,10 @@ class SearchBorrowWindow(QWidget):
         main_layout.addLayout(stats_bar)
 
     def _load_combo_data(self):
+        self.sender_combo.clear()
+        self.receiver_combo.clear()
+        self.category_combo.clear()
+
         people = execute_query_returning("SELECT id, name FROM people ORDER BY name")
         self.sender_combo.addItem("全部", None)
         self.receiver_combo.addItem("全部", None)
@@ -446,6 +457,22 @@ class SearchBorrowWindow(QWidget):
         if restoration != "全部":
             results = [r for r in results if r.get("restoration_status") == restoration]
 
+        letter_ids = [r["id"] for r in results]
+        borrow_map = {}
+        if letter_ids:
+            placeholders = ",".join("?" for _ in letter_ids)
+            borrow_rows = execute_query_returning(
+                f"SELECT letter_id, status FROM borrow_records "
+                f"WHERE id IN (SELECT MAX(id) FROM borrow_records GROUP BY letter_id) "
+                f"AND letter_id IN ({placeholders})",
+                tuple(letter_ids)
+            )
+            for br in borrow_rows:
+                borrow_map[br["letter_id"]] = br["status"]
+
+        for r in results:
+            r["_borrow_status"] = borrow_map.get(r["id"], "无")
+
         self._populate_search_table(results)
 
     def _populate_search_table(self, results):
@@ -467,6 +494,15 @@ class SearchBorrowWindow(QWidget):
             if r.get("is_private"):
                 private_item.setForeground(QColor("#e74c3c"))
             self.search_table.setItem(row, 7, private_item)
+
+            borrow_status = r.get("_borrow_status", "无")
+            borrow_item = QTableWidgetItem(borrow_status)
+            borrow_item.setTextAlignment(Qt.AlignCenter)
+            if borrow_status == "借出":
+                borrow_item.setForeground(QColor("#f39c12"))
+            elif borrow_status == "已归还":
+                borrow_item.setForeground(QColor("#27ae60"))
+            self.search_table.setItem(row, 8, borrow_item)
 
         self.search_table.setRowCount(len(results))
 
@@ -538,6 +574,8 @@ class SearchBorrowWindow(QWidget):
             )
             self._refresh_borrow_table()
             self._update_statistics()
+            self._do_search()
+            self.data_changed.emit()
 
     def _on_register_return(self):
         selected = self.borrow_table.selectionModel().selectedRows()
@@ -564,6 +602,8 @@ class SearchBorrowWindow(QWidget):
             )
             self._refresh_borrow_table()
             self._update_statistics()
+            self._do_search()
+            self.data_changed.emit()
 
     def _on_delete_record(self):
         selected = self.borrow_table.selectionModel().selectedRows()
@@ -581,6 +621,45 @@ class SearchBorrowWindow(QWidget):
             execute_update("DELETE FROM borrow_records WHERE id = ?", (record_id,))
             self._refresh_borrow_table()
             self._update_statistics()
+            self._do_search()
+            self.data_changed.emit()
+
+    def _on_borrow_from_result(self):
+        selected = self.search_table.selectionModel().selectedRows()
+        if not selected:
+            QMessageBox.information(self, "提示", "请先在搜索结果中选择一封信件。")
+            return
+        row = selected[0].row()
+        letter_id = int(self.search_table.item(row, 0).text())
+        letter_title = self.search_table.item(row, 1).text()
+
+        borrow_status_item = self.search_table.item(row, 8)
+        if borrow_status_item and borrow_status_item.text() == "借出":
+            QMessageBox.information(self, "提示", f"「{letter_title}」已在借出中，无需重复登记。")
+            return
+
+        dlg = BorrowDialog(self)
+        for i in range(dlg.letter_combo.count()):
+            if dlg.letter_combo.itemData(i) == letter_id:
+                dlg.letter_combo.setCurrentIndex(i)
+                break
+        if dlg.exec_() == QDialog.Accepted:
+            data = dlg.get_data()
+            execute_query(
+                "INSERT INTO borrow_records (letter_id, borrower_name, borrow_date, expected_return_date, status, notes) "
+                "VALUES (?, ?, ?, ?, '借出', ?)",
+                (
+                    data["letter_id"],
+                    data["borrower_name"],
+                    data["borrow_date"],
+                    data["expected_return_date"],
+                    data["notes"],
+                ),
+            )
+            self._refresh_borrow_table()
+            self._update_statistics()
+            self._do_search()
+            self.data_changed.emit()
 
     def _update_statistics(self):
         rows = execute_query_returning(
@@ -601,5 +680,6 @@ class SearchBorrowWindow(QWidget):
 
     def refresh(self):
         self._load_combo_data()
+        self._do_search()
         self._refresh_borrow_table()
         self._update_statistics()

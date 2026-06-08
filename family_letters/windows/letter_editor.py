@@ -739,6 +739,18 @@ class LetterEditor(QWidget):
 
         self._save_photo_descriptions()
         self._load_letter_list()
+        self._populate_people_combo(self.sender_combo)
+        self._populate_people_combo(self.receiver_combo)
+        if sender_id:
+            for i in range(self.sender_combo.count()):
+                if self.sender_combo.itemData(i) == sender_id:
+                    self.sender_combo.setCurrentIndex(i)
+                    break
+        if receiver_id:
+            for i in range(self.receiver_combo.count()):
+                if self.receiver_combo.itemData(i) == receiver_id:
+                    self.receiver_combo.setCurrentIndex(i)
+                    break
         self.data_changed.emit()
         QMessageBox.information(self, "保存成功", "信件修改已保存")
 
@@ -820,3 +832,11 @@ class LetterEditor(QWidget):
                 combo.setCurrentIndex(i)
                 break
         return new_id
+
+    def _select_letter_by_id(self, letter_id):
+        for row in range(self.letter_table.rowCount()):
+            item = self.letter_table.item(row, 0)
+            if item and int(item.text()) == letter_id:
+                self.letter_table.selectRow(row)
+                self._on_letter_selected(row, 0)
+                break

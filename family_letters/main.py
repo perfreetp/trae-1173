@@ -196,6 +196,11 @@ class MainWindow(QMainWindow):
                     page.letter_deleted.connect(self._refresh_all)
                 except Exception:
                     pass
+            if hasattr(page, 'navigate_to_letter'):
+                try:
+                    page.navigate_to_letter.connect(self._navigate_to_letter)
+                except Exception:
+                    pass
 
     def _switch_page(self, index):
         if 0 <= index < self.stack.count():
@@ -203,6 +208,14 @@ class MainWindow(QMainWindow):
             page = self.pages[index]
             if hasattr(page, 'refresh'):
                 page.refresh()
+
+    def _navigate_to_letter(self, letter_id):
+        self.stack.setCurrentIndex(2)
+        editor = self.pages[2]
+        if hasattr(editor, 'refresh'):
+            editor.refresh()
+        if hasattr(editor, '_select_letter_by_id'):
+            editor._select_letter_by_id(letter_id)
 
     def _refresh_all(self):
         for page in self.pages:

@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton,
     QTableWidget, QTableWidgetItem, QTextEdit, QFileDialog,
     QHeaderView, QLabel, QProgressBar, QMessageBox, QAbstractItemView,
+    QComboBox, QCheckBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush, QPen
@@ -254,6 +255,27 @@ class BackupHandoverWindow(QWidget):
         group = QGroupBox("移交清单")
         layout = QVBoxLayout(group)
 
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("借阅状态："))
+        self.filter_borrow_combo = QComboBox()
+        self.filter_borrow_combo.addItems(["全部", "借出", "已归还", "无"])
+        self.filter_borrow_combo.setMinimumWidth(90)
+        self.filter_borrow_combo.currentTextChanged.connect(self._refresh_handover_table)
+        filter_row.addWidget(self.filter_borrow_combo)
+
+        filter_row.addWidget(QLabel("修复状态："))
+        self.filter_restoration_combo = QComboBox()
+        self.filter_restoration_combo.addItems(["全部", "良好", "轻微损毁", "需修复", "已修复"])
+        self.filter_restoration_combo.setMinimumWidth(90)
+        self.filter_restoration_combo.currentTextChanged.connect(self._refresh_handover_table)
+        filter_row.addWidget(self.filter_restoration_combo)
+
+        self.filter_private_check = QCheckBox("仅私密")
+        self.filter_private_check.stateChanged.connect(self._refresh_handover_table)
+        filter_row.addWidget(self.filter_private_check)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
         self.handover_table = QTableWidget(0, 6)
         self.handover_table.setHorizontalHeaderLabels(
             ["编号", "信件标题", "寄信人", "收信人", "保存状态", "借阅状态"]
@@ -314,7 +336,7 @@ class BackupHandoverWindow(QWidget):
     def _refresh_handover_table(self):
         rows = execute_query_returning("""
             SELECT l.id, l.title, p1.name AS sender_name, p2.name AS receiver_name,
-                   l.restoration_status,
+                   l.restoration_status, l.is_private,
                    COALESCE(br.status, '无') AS borrow_status
             FROM letters l
             LEFT JOIN people p1 ON l.sender_id = p1.id
@@ -325,6 +347,18 @@ class BackupHandoverWindow(QWidget):
             ) br ON br.letter_id = l.id
             ORDER BY l.id
         """)
+
+        borrow_filter = self.filter_borrow_combo.currentText()
+        if borrow_filter != "全部":
+            rows = [r for r in rows if r.get("borrow_status", "无") == borrow_filter]
+
+        restoration_filter = self.filter_restoration_combo.currentText()
+        if restoration_filter != "全部":
+            rows = [r for r in rows if r.get("restoration_status", "") == restoration_filter]
+
+        if self.filter_private_check.isChecked():
+            rows = [r for r in rows if r.get("is_private")]
+
         self.handover_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             self.handover_table.setItem(i, 0, QTableWidgetItem(str(row.get("id", ""))))
@@ -345,6 +379,18 @@ class BackupHandoverWindow(QWidget):
             if borrow == "借出":
                 borrow_item.setForeground(QColor("#fbbc04"))
             self.handover_table.setItem(i, 5, borrow_item)
+
+    def _get_handover_filter_desc(self):
+        parts = []
+        borrow = self.filter_borrow_combo.currentText()
+        if borrow != "全部":
+            parts.append(f"借阅状态={borrow}")
+        restoration = self.filter_restoration_combo.currentText()
+        if restoration != "全部":
+            parts.append(f"修复状态={restoration}")
+        if self.filter_private_check.isChecked():
+            parts.append("仅私密")
+        return "；".join(parts) if parts else "无筛选"
 
     def _refresh_statistics(self):
         category_data = {}
@@ -452,9 +498,23 @@ class BackupHandoverWindow(QWidget):
             return
 
         try:
+            letters = self._get_all_letters()
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "家书集"
+
+            filter_desc = self._get_handover_filter_desc()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            ws.merge_cells("A1:L1")
+            ws.cell(row=1, column=1, value="家书集").font = XlFont(
+                name="Microsoft YaHei", bold=True, size=16, color="1A73E8"
+            )
+            ws.cell(row=1, column=1).alignment = Alignment(horizontal="center")
+            ws.merge_cells("A2:L2")
+            ws.cell(row=2, column=1, value=f"生成时间：{now_str}　筛选条件：{filter_desc}　共计 {len(letters)} 条记录").font = XlFont(
+                name="Microsoft YaHei", size=11, color="333333"
+            )
 
             headers = ["编号", "标题", "寄信人", "收信人", "寄出日期", "收到日期",
                         "寄出地点", "收到地点", "内容", "分类", "保存状态", "备注"]
@@ -467,16 +527,15 @@ class BackupHandoverWindow(QWidget):
             )
 
             for col_idx, h in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=h)
+                cell = ws.cell(row=3, column=col_idx, value=h)
                 cell.font = header_font
                 cell.fill = header_fill
                 cell.alignment = header_align
                 cell.border = thin_border
 
-            letters = self._get_all_letters()
             content_font = XlFont(name="Microsoft YaHei", size=10)
             content_align = Alignment(vertical="top", wrap_text=True)
-            for row_idx, lt in enumerate(letters, 2):
+            for row_idx, lt in enumerate(letters, 4):
                 values = [
                     lt.get("id"), lt.get("title", ""), lt.get("sender_name", ""),
                     lt.get("receiver_name", ""), lt.get("send_date", ""),
@@ -596,6 +655,8 @@ class BackupHandoverWindow(QWidget):
 
         try:
             letters = self._get_all_letters()
+            filter_desc = self._get_handover_filter_desc()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             html_parts = [
                 "<!DOCTYPE html>",
                 "<html lang='zh-CN'><head><meta charset='UTF-8'>",
@@ -603,6 +664,7 @@ class BackupHandoverWindow(QWidget):
                 "<style>",
                 "body{font-family:'Microsoft YaHei','SimHei',sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#f5f7fa;color:#333;}",
                 "h1{text-align:center;color:#1a73e8;border-bottom:2px solid #1a73e8;padding-bottom:10px;}",
+                ".info{text-align:center;color:#666;font-size:13px;margin-bottom:20px;}",
                 ".letter{background:#fff;border-radius:8px;padding:20px;margin:20px 0;box-shadow:0 2px 8px rgba(0,0,0,0.08);}",
                 ".letter h2{color:#1a73e8;margin:0 0 8px 0;font-size:18px;}",
                 ".meta{color:#666;font-size:13px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;}",
@@ -612,6 +674,7 @@ class BackupHandoverWindow(QWidget):
                 ".photo-desc{color:#999;font-size:12px;margin-top:4px;}",
                 "</style></head><body>",
                 "<h1>家书集</h1>",
+                f"<div class='info'>生成时间：{now_str}　筛选条件：{filter_desc}</div>",
             ]
 
             for lt in letters:
@@ -683,7 +746,7 @@ class BackupHandoverWindow(QWidget):
         try:
             rows = execute_query_returning("""
                 SELECT l.id, l.title, p1.name AS sender_name, p2.name AS receiver_name,
-                       l.send_date, l.receive_date, l.restoration_status,
+                       l.send_date, l.receive_date, l.restoration_status, l.is_private,
                        COALESCE(br.status, '无') AS borrow_status,
                        COALESCE(br.borrower_name, '') AS borrower_name
                 FROM letters l
@@ -697,9 +760,32 @@ class BackupHandoverWindow(QWidget):
                 ORDER BY l.id
             """)
 
+            borrow_filter = self.filter_borrow_combo.currentText()
+            if borrow_filter != "全部":
+                rows = [r for r in rows if r.get("borrow_status", "无") == borrow_filter]
+
+            restoration_filter = self.filter_restoration_combo.currentText()
+            if restoration_filter != "全部":
+                rows = [r for r in rows if r.get("restoration_status", "") == restoration_filter]
+
+            if self.filter_private_check.isChecked():
+                rows = [r for r in rows if r.get("is_private")]
+
+            filter_desc = self._get_handover_filter_desc()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "移交清单"
+
+            info_font = XlFont(name="Microsoft YaHei", size=11, color="333333")
+            ws.merge_cells("A1:I1")
+            ws.cell(row=1, column=1, value="移交清单").font = XlFont(
+                name="Microsoft YaHei", bold=True, size=16, color="1A73E8"
+            )
+            ws.cell(row=1, column=1).alignment = Alignment(horizontal="center")
+            ws.merge_cells("A2:I2")
+            ws.cell(row=2, column=1, value=f"生成时间：{now_str}　筛选条件：{filter_desc}　共计 {len(rows)} 条记录").font = info_font
 
             headers = ["编号", "信件标题", "寄信人", "收信人", "寄出日期",
                         "收到日期", "保存状态", "借阅状态", "借阅人"]
@@ -711,7 +797,7 @@ class BackupHandoverWindow(QWidget):
                 top=Side(style="thin"), bottom=Side(style="thin"),
             )
             for col_idx, h in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=h)
+                cell = ws.cell(row=3, column=col_idx, value=h)
                 cell.font = header_font
                 cell.fill = header_fill
                 cell.alignment = header_align
@@ -722,7 +808,7 @@ class BackupHandoverWindow(QWidget):
             warn_fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
             danger_fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
 
-            for row_idx, row in enumerate(rows, 2):
+            for row_idx, row in enumerate(rows, 4):
                 values = [
                     row.get("id"), row.get("title", ""), row.get("sender_name", ""),
                     row.get("receiver_name", ""), row.get("send_date", ""),
@@ -738,7 +824,7 @@ class BackupHandoverWindow(QWidget):
                 rest_status = row.get("restoration_status", "")
                 if rest_status == "需修复":
                     ws.cell(row=row_idx, column=7).fill = danger_fill
-                elif rest_status == "一般":
+                elif rest_status == "轻微损毁":
                     ws.cell(row=row_idx, column=7).fill = warn_fill
 
                 borrow_status = row.get("borrow_status", "无")
@@ -752,7 +838,7 @@ class BackupHandoverWindow(QWidget):
             ws.auto_filter.ref = ws.dimensions
 
             wb.save(path)
-            self._log(f"已生成移交清单：{path}（共 {len(rows)} 条记录）")
+            self._log(f"已生成移交清单：{path}（筛选：{filter_desc}，共 {len(rows)} 条记录）")
             QMessageBox.information(self, "导出成功", f"移交清单已导出至：\n{path}")
         except Exception as e:
             self._log(f"生成移交清单失败：{e}")
